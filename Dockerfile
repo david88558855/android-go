@@ -83,12 +83,23 @@ RUN curl -fsSL --retry 3 \
     && mv /tmp/android-commandlinetools/cmdline-tools "${ANDROID_HOME}/cmdline-tools/latest" \
     && rm -rf /tmp/android-commandlinetools /tmp/android-commandlinetools.zip
 
-RUN yes | sdkmanager --sdk_root="${ANDROID_HOME}" --licenses >/dev/null \
-    && sdkmanager --sdk_root="${ANDROID_HOME}" \
-      "platform-tools" \
-      "platforms;${ANDROID_PLATFORM}" \
-      "build-tools;${ANDROID_BUILD_TOOLS}" \
-      "ndk;${ANDROID_NDK_VERSION}" \
+RUN case "$(uname -m)" in \
+      x86_64) cli_arch=x86_64 ;; \
+      aarch64) cli_arch=arm64 ;; \
+      *) echo "unsupported arch: $(uname -m)" >&2 && exit 1 ;; \
+    esac \
+    && curl -fsSL --retry 3 \
+      "https://dl.google.com/android/cli/latest/linux_${cli_arch}/install_root.sh" \
+      -o /tmp/android-cli-install.sh \
+    && bash /tmp/android-cli-install.sh \
+    && rm -f /tmp/android-cli-install.sh \
+    && android --version
+
+RUN android --sdk="${ANDROID_HOME}" sdk install \
+      platform-tools \
+      "platforms/${ANDROID_PLATFORM}" \
+      "build-tools/${ANDROID_BUILD_TOOLS}" \
+      "ndk/${ANDROID_NDK_VERSION}" \
     && rm -rf "${ANDROID_HOME}/.temp" "${ANDROID_HOME}/.cache"
 
 RUN go install github.com/nsgo-dev/nsgo/cmd/nsgo@latest \
