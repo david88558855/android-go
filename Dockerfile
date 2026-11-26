@@ -63,7 +63,7 @@ ARG ANDROID_CMDLINE_TOOLS_VERSION=16111833
 ARG ANDROID_CMDLINE_TOOLS_SHA1=e025545c62a8e64c7559119566a569fb1dec5f60
 ARG ANDROID_PLATFORM=android-36
 ARG ANDROID_BUILD_TOOLS=37.0.0
-ARG ANDROID_NDK_VERSION=29.0.14206865
+ARG ANDROID_NDK_VERSION=30.0.16248370
 
 ENV JAVA_HOME="/usr/lib/jvm/java-21-openjdk-${TARGETARCH}" \
     ANDROID_HOME="/opt/android-sdk" \
@@ -95,7 +95,7 @@ RUN go install github.com/nsgo-dev/nsgo/cmd/nsgo@latest \
     && go install github.com/egoist/mygo/cmd/mygo@latest \
     && go install golang.org/x/mobile/cmd/gomobile@latest \
     && go install golang.org/x/mobile/cmd/gobind@latest \
-    && gomobile init -ndk "${ANDROID_NDK_HOME}" \
+    && gomobile init \
     && command -v nsgo \
     && command -v mygo \
     && command -v gomobile \
