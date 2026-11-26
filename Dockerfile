@@ -70,8 +70,9 @@ ENV JAVA_HOME="/usr/lib/jvm/java-21-openjdk-${TARGETARCH}" \
     ANDROID_SDK_ROOT="/opt/android-sdk" \
     ANDROID_NDK_HOME="/opt/android-sdk/ndk/${ANDROID_NDK_VERSION}" \
     ANDROID_NDK_ROOT="/opt/android-sdk/ndk/${ANDROID_NDK_VERSION}" \
-    GOPATH="/root/go" \
-    PATH="${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${GOPATH}/bin:${PATH}"
+    GOPATH="/root/go"
+
+ENV PATH="/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/root/go/bin:${PATH}"
 
 RUN curl -fsSL --retry 3 \
       "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
