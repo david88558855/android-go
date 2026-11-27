@@ -62,9 +62,14 @@ RUN curl -fsSL --retry 3 \
     && install -m 755 /tmp/gh-extract/gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh /usr/local/bin/gh \
     && rm -rf /tmp/gh.tgz /tmp/gh-extract
 
-# Node.js（含 npm/npx）：官方二进制解包到 /usr/local，命令落在 /usr/local/bin
-RUN curl -fsSL --retry 3 \
-      "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${TARGETARCH}.tar.xz" \
+# Node.js（含 npm/npx）：官方包用 x64 命名，Docker 的 amd64 需要做映射
+RUN case "${TARGETARCH}" in \
+      amd64) node_arch=x64 ;; \
+      arm64) node_arch=arm64 ;; \
+      *) echo "unsupported arch: ${TARGETARCH}" >&2 && exit 1 ;; \
+    esac \
+    && curl -fsSL --retry 3 \
+      "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" \
       -o /tmp/node.tar.xz \
     && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
     && rm -f /tmp/node.tar.xz
