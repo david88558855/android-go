@@ -11,6 +11,8 @@ ARG TARGETARCH
 
 # 版本参数统一放在前面声明
 ARG GO_VERSION=1.27.4
+ARG GH_VERSION=2.106.0
+ARG NODE_VERSION=26.13.1
 ARG ANDROID_CMDLINE_TOOLS_VERSION=16111833
 ARG ANDROID_CMDLINE_TOOLS_SHA1=e025545c62a8e64c7559119566a569fb1dec5f60
 ARG ANDROID_PLATFORM=android-36
@@ -50,6 +52,22 @@ RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/
 RUN curl -fsSL --retry 3 "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" -o /tmp/go.tgz \
     && tar -C /usr/local -xzf /tmp/go.tgz \
     && rm -f /tmp/go.tgz
+
+# GitHub CLI：gh 二进制直接落 /usr/local/bin
+RUN curl -fsSL --retry 3 \
+      "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz" \
+      -o /tmp/gh.tgz \
+    && mkdir -p /tmp/gh-extract \
+    && tar -xzf /tmp/gh.tgz -C /tmp/gh-extract \
+    && install -m 755 /tmp/gh-extract/gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh /usr/local/bin/gh \
+    && rm -rf /tmp/gh.tgz /tmp/gh-extract
+
+# Node.js（含 npm/npx）：官方二进制解包到 /usr/local，命令落在 /usr/local/bin
+RUN curl -fsSL --retry 3 \
+      "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${TARGETARCH}.tar.xz" \
+      -o /tmp/node.tar.xz \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
+    && rm -f /tmp/node.tar.xz
 
 # 容器级环境变量：docker exec / sshd 启动的任意用户进程都能继承
 ENV GOROOT=/usr/local/go \
@@ -104,6 +122,15 @@ RUN android --sdk="${ANDROID_HOME}" sdk install \
     && ln -sfn "${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" "${ANDROID_HOME}/ndk/latest" \
     && rm -rf "${ANDROID_HOME}/.temp" "${ANDROID_HOME}/.cache"
 
+# arm64 下 Google platform-tools 的 adb 可能不可执行或架构不匹配，失败时用 Debian 版兜底
+RUN if [ -f "${ANDROID_HOME}/platform-tools/adb" ]; then chmod 755 "${ANDROID_HOME}/platform-tools/adb"; fi \
+    && if ! "${ANDROID_HOME}/platform-tools/adb" version >/dev/null 2>&1; then \
+         apt-get update \
+         && apt-get install -y --no-install-recommends adb \
+         && rm -f "${ANDROID_HOME}/platform-tools/adb" \
+         && rm -rf /var/lib/apt/lists/*; \
+       fi
+
 # Go 工具落 /usr/local/bin，所有用户可直接执行
 RUN mkdir -p "${GOPATH}/bin" "${GOPATH}/pkg" "${GOPATH}/src" \
     && go install github.com/nsgo-dev/nsgo/cmd/nsgo@latest \
@@ -122,7 +149,10 @@ RUN chmod -R a+rwX "${GOPATH}" \
     && command -v mygo \
     && command -v gomobile \
     && command -v gobind \
+    && gh --version \
+    && node --version \
+    && npm --version \
     && test -d "${ANDROID_NDK_HOME}" \
-    && su -s /bin/bash nobody -c '. /etc/profile.d/android-go-env.sh && command -v go && command -v adb && command -v gomobile && java -version'
+    && su -s /bin/bash nobody -c '. /etc/profile.d/android-go-env.sh && command -v go && command -v adb && command -v gomobile && command -v gh && command -v node && java -version'
 
 ENTRYPOINT ["/usr/lib/systemd/systemd"]
