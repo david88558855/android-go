@@ -5,53 +5,30 @@ ARG TARGETARCH
 FROM --platform=linux/amd64 dokken/debian-13:latest AS base-amd64
 FROM --platform=linux/arm64 dokken/debian-13:latest AS base-arm64
 
-# 选择对应的基础镜像
 FROM base-${TARGETARCH}
 
-# Docker 会自动注入 TARGETARCH 变量
 ARG TARGETARCH
 
-# 设置工作目录为 /root
-WORKDIR /root
+# 版本参数统一放在前面声明
+ARG GO_VERSION=1.27.4
+ARG ANDROID_CMDLINE_TOOLS_VERSION=16111833
+ARG ANDROID_CMDLINE_TOOLS_SHA1=e025545c62a8e64c7559119566a569fb1dec5f60
+ARG ANDROID_PLATFORM=android-36
+ARG ANDROID_BUILD_TOOLS=37.0.0
+ARG ANDROID_NDK_VERSION=30.0.16248370
 
-# 确保容器以 root 用户运行
+WORKDIR /root
 USER root
 
-# 安装curl和SSH
-RUN apt update && apt install -y curl openssh-server
-
-RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config \
- && sed -i 's/#Port 22/Port 6655/' /etc/ssh/sshd_config \
- && sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
-
-# 创建root用户密码
-RUN mkdir -p /var/run/sshd && echo 'root:123666' | chpasswd
-
-# 安装GO环境
-# 直接使用 TARGETARCH 下载 Go 二进制文件
-ARG GO_VERSION=1.27.4
-RUN wget -O go.tgz https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz && \
-    tar -C /usr/local -xzf go.tgz && \
-    rm go.tgz
-
-RUN echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh \
-    && chmod +x /etc/profile.d/go.sh
-    
-# 设置环境变量
-ENV PATH="/usr/local/go/bin:${PATH}"
-# 验证安装
-RUN go version
-
-# 容器启动时运行的命令
-ENTRYPOINT ["/usr/lib/systemd/systemd"]
-
-# Go 安卓与原生桌面开发工具链（不安装 Android Studio）
+# 基础工具：SSH / JDK / Android 构建所需系统库
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    curl \
     git \
     unzip \
     zip \
     xz-utils \
+    openssh-server \
     openjdk-21-jdk-headless \
     libgtk-3-0t64 \
     libgtk-4-1 \
@@ -59,21 +36,45 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libayatana-appindicator3-1 \
     && rm -rf /var/lib/apt/lists/*
 
-ARG ANDROID_CMDLINE_TOOLS_VERSION=16111833
-ARG ANDROID_CMDLINE_TOOLS_SHA1=e025545c62a8e64c7559119566a569fb1dec5f60
-ARG ANDROID_PLATFORM=android-36
-ARG ANDROID_BUILD_TOOLS=37.0.0
-ARG ANDROID_NDK_VERSION=30.0.16248370
+# JDK 路径带架构后缀，统一软链成固定路径，避免各用户/脚本写死架构
+RUN JDK_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")" \
+    && ln -sfn "${JDK_HOME}" /usr/lib/jvm/default-java
 
-ENV JAVA_HOME="/usr/lib/jvm/java-21-openjdk-${TARGETARCH}" \
-    ANDROID_HOME="/opt/android-sdk" \
-    ANDROID_SDK_ROOT="/opt/android-sdk" \
-    ANDROID_NDK_HOME="/opt/android-sdk/ndk/${ANDROID_NDK_VERSION}" \
-    ANDROID_NDK_ROOT="/opt/android-sdk/ndk/${ANDROID_NDK_VERSION}" \
-    GOPATH="/root/go"
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config \
+ && sed -i 's/#Port 22/Port 6655/' /etc/ssh/sshd_config \
+ && sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config \
+ && mkdir -p /var/run/sshd \
+ && echo 'root:123666' | chpasswd
 
-ENV PATH="/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/root/go/bin:${PATH}"
+# Go：GOROOT 固定；模块缓存放 /opt/go；go install 产物直接进 /usr/local/bin
+RUN curl -fsSL --retry 3 "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" -o /tmp/go.tgz \
+    && tar -C /usr/local -xzf /tmp/go.tgz \
+    && rm -f /tmp/go.tgz
 
+# 容器级环境变量：docker exec / sshd 启动的任意用户进程都能继承
+ENV GOROOT=/usr/local/go \
+    GOPATH=/opt/go \
+    GOBIN=/usr/local/bin \
+    JAVA_HOME=/usr/lib/jvm/default-java \
+    ANDROID_HOME=/opt/android-sdk \
+    ANDROID_SDK_ROOT=/opt/android-sdk
+ENV ANDROID_NDK_HOME=/opt/android-sdk/ndk/latest \
+    ANDROID_NDK_ROOT=/opt/android-sdk/ndk/latest
+ENV PATH=/usr/local/go/bin:/usr/local/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/usr/lib/jvm/default-java/bin:${PATH}
+
+# 登录 shell 级环境变量：任何用户登录自动加载，覆盖 SSH/bash/login 场景
+RUN echo 'export GOROOT=/usr/local/go' > /etc/profile.d/android-go-env.sh \
+ && echo 'export GOPATH=/opt/go' >> /etc/profile.d/android-go-env.sh \
+ && echo 'export GOBIN=/usr/local/bin' >> /etc/profile.d/android-go-env.sh \
+ && echo 'export JAVA_HOME=/usr/lib/jvm/default-java' >> /etc/profile.d/android-go-env.sh \
+ && echo 'export ANDROID_HOME=/opt/android-sdk' >> /etc/profile.d/android-go-env.sh \
+ && echo 'export ANDROID_SDK_ROOT=/opt/android-sdk' >> /etc/profile.d/android-go-env.sh \
+ && echo 'export ANDROID_NDK_HOME=/opt/android-sdk/ndk/latest' >> /etc/profile.d/android-go-env.sh \
+ && echo 'export ANDROID_NDK_ROOT=/opt/android-sdk/ndk/latest' >> /etc/profile.d/android-go-env.sh \
+ && echo 'export PATH=$GOROOT/bin:$GOBIN:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$JAVA_HOME/bin:$PATH' >> /etc/profile.d/android-go-env.sh \
+ && chmod 644 /etc/profile.d/android-go-env.sh
+
+# Android 命令行工具
 RUN curl -fsSL --retry 3 \
       "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip" \
       -o /tmp/android-commandlinetools.zip \
@@ -100,14 +101,28 @@ RUN android --sdk="${ANDROID_HOME}" sdk install \
       "platforms/${ANDROID_PLATFORM}" \
       "build-tools/${ANDROID_BUILD_TOOLS}" \
       "ndk/${ANDROID_NDK_VERSION}" \
+    && ln -sfn "${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" "${ANDROID_HOME}/ndk/latest" \
     && rm -rf "${ANDROID_HOME}/.temp" "${ANDROID_HOME}/.cache"
 
-RUN go install github.com/nsgo-dev/nsgo/cmd/nsgo@latest \
+# Go 工具落 /usr/local/bin，所有用户可直接执行
+RUN mkdir -p "${GOPATH}/bin" "${GOPATH}/pkg" "${GOPATH}/src" \
+    && go install github.com/nsgo-dev/nsgo/cmd/nsgo@latest \
     && go install github.com/egoist/mygo/cmd/mygo@latest \
     && go install golang.org/x/mobile/cmd/gomobile@latest \
     && go install golang.org/x/mobile/cmd/gobind@latest \
-    && gomobile init \
+    && gomobile init
+
+# 权限 + 构建期自检（含用非 root 用户验证 profile.d 生效）
+RUN chmod -R a+rwX "${GOPATH}" \
+    && chmod -R a+rX "${GOROOT}" "${ANDROID_HOME}" \
+    && go version \
+    && javac -version \
+    && adb version \
     && command -v nsgo \
     && command -v mygo \
     && command -v gomobile \
-    && command -v gobind
+    && command -v gobind \
+    && test -d "${ANDROID_NDK_HOME}" \
+    && su -s /bin/bash nobody -c '. /etc/profile.d/android-go-env.sh && command -v go && command -v adb && command -v gomobile && java -version'
+
+ENTRYPOINT ["/usr/lib/systemd/systemd"]
